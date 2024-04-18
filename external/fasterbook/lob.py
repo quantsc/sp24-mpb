@@ -129,152 +129,6 @@ from itertools import islice
 log = logging.getLogger(__name__)
 
 
-class LimitOrderBook:
-    """Limit Order Book (LOB) implementation for High Frequency Trading
-
-    Implementation as described by WK Selph (see header doc string for link).
-
-    """
-    def __init__(self):
-        self.bids = LimitLevelTree()
-        self.asks = LimitLevelTree()
-        self.best_bid = None
-        self.best_ask = None
-        self._price_levels = {}
-        self._orders = {}
-
-    @property
-    def top_level(self):
-        """Returns the best available bid and ask.
-
-        :return:
-        """
-        return self.best_bid, self.best_ask
-
-    def process(self, order):
-        """Processes the given order.
-
-        If the order's size is 0, it is removed from the book.
-
-        If its size isn't zero and it exists within the book, the order is updated.
-
-        If it doesn't exist, it will be added.
-
-        :param order:
-        :return:
-        """
-        if order.size == 0:
-            self.remove(order)
-        else:
-            try:
-                self.update(order)
-            except KeyError:
-                self.add(order)
-
-    def update(self, order):
-        """Updates an existing order in the book.
-
-        It also updates the order's related LimitLevel's size, accordingly.
-
-        :param order:
-        :return:
-        """
-        size_diff = self._orders[order.uid].size - order.size
-        self._orders[order.uid].size = order.size
-        self._orders[order.uid].parent_limit.size -= size_diff
-
-    def remove(self, order):
-        """Removes an order from the book.
-
-        If the Limit Level is then empty, it is also removed from the book's
-        relevant tree.
-
-        If the removed LimitLevel was either the top bid or ask, it is replaced
-        by the next best value (which is the LimitLevel's parent in an
-        AVL tree).
-
-        :param order:
-        :return:
-        """
-        # Remove Order from self._orders
-        try:
-            popped_item = self._orders.pop(order.uid)
-        except KeyError:
-            return False
-
-        # Remove order from its doubly linked list
-        popped_item.pop_from_list()
-
-        # Remove Limit Level from self._price_levels and tree, if no orders are
-        # left within that limit level
-        try:
-            if len(self._price_levels[popped_item.price]) == 0:
-                popped_limit_level = self._price_levels.pop(popped_item.price)
-                # Remove Limit Level from LimitLevelTree
-                if popped_item.is_bid:
-                    if popped_limit_level == self.best_bid:
-                        if not isinstance(popped_limit_level.parent, LimitLevelTree):
-                            self.best_bid = popped_limit_level.parent
-                        else:
-                            self.best_bid = None
-
-                    popped_limit_level.remove()
-                else:
-                    if popped_limit_level == self.best_ask:
-                        if not isinstance(popped_limit_level.parent, LimitLevelTree):
-                            self.best_ask = popped_limit_level.parent
-                        else:
-                            self.best_ask = None
-                    popped_limit_level.remove()
-        except KeyError:
-            pass
-
-        return popped_item
-
-    def add(self, order):
-        """Adds a new LimitLevel to the book and appends the given order to it.
-
-        :param order: Order() Instance
-        :return:
-        """
-
-        if order.price not in self._price_levels:
-            limit_level = LimitLevel(order)
-            self._orders[order.uid] = order
-            self._price_levels[limit_level.price] = limit_level
-
-            if order.is_bid:
-                self.bids.insert(limit_level)
-                if self.best_bid is None or limit_level.price > self.best_bid.price:
-                    self.best_bid = limit_level
-
-            else:
-                self.asks.insert(limit_level)
-                if self.best_ask is None or limit_level.price < self.best_ask.price:
-                    self.best_ask = limit_level
-        else:
-            # The price level already exists, hence we need to append the order
-            # to that price level
-            self._orders[order.uid] = order
-            self._price_levels[order.price].append(order)
-    
-    
-    def levels(self, depth=None):
-        """Returns the price levels as a dict {'bids': [bid1, ...], 'asks': [ask1, ...]}
-        
-        :param depth: Desired number of levels on each side to return.
-        :return:
-        """
-        levels_sorted = sorted(self._price_levels.keys())
-        bids_all = reversed([price_level for price_level in levels_sorted if price_level < self.best_ask.price])
-        bids = list(islice(bids_all, depth)) if depth else list(bids_all)
-        asks_all = (price_level for price_level in levels_sorted if price_level > self.best_bid.price)
-        asks = list(islice(asks_all, depth)) if depth else list(asks_all)
-        levels_dict = {
-            'bids' : [self._price_levels[price] for price in bids],
-            'asks' : [self._price_levels[price] for price in asks],
-            }
-        return levels_dict
 
 class LimitLevel:
     """AVL BST node.
@@ -435,6 +289,7 @@ class LimitLevel:
             pass
         else:
             # Unforeseen things have happened. D:
+            return
             raise NotImplementedError
 
         return
@@ -557,7 +412,7 @@ class LimitLevelTree:
         self.right_child = None
         self.is_root = True
 
-    def insert(self, limit_level):
+    def insert(self, limit_level: LimitLevel):
         """Iterative AVL Insert method to insert a new Node.
 
         Inserts a new node and calls the grand-parent's balance() method -
@@ -713,3 +568,150 @@ class Order:
 
     def __repr__(self):
         return str((self.uid, self.is_bid, self.price, self.size, self.timestamp))
+
+class LimitOrderBook:
+    """Limit Order Book (LOB) implementation for High Frequency Trading
+
+    Implementation as described by WK Selph (see header doc string for link).
+
+    """
+    def __init__(self):
+        self.bids = LimitLevelTree()
+        self.asks = LimitLevelTree()
+        self.best_bid = None
+        self.best_ask = None
+        self._price_levels = {}
+        self._orders = {}
+
+    @property
+    def top_level(self):
+        """Returns the best available bid and ask.
+
+        :return:
+        """
+        return self.best_bid, self.best_ask
+
+    def process(self, order: Order):
+        """Processes the given order.
+
+        If the order's size is 0, it is removed from the book.
+
+        If its size isn't zero and it exists within the book, the order is updated.
+
+        If it doesn't exist, it will be added.
+
+        :param order:
+        :return:
+        """
+        if order.size == 0:
+            self.remove(order)
+        else:
+            try:
+                self.update(order)
+            except KeyError:
+                self.add(order)
+
+    def update(self, order):
+        """Updates an existing order in the book.
+
+        It also updates the order's related LimitLevel's size, accordingly.
+
+        :param order:
+        :return:
+        """
+        size_diff = self._orders[order.uid].size - order.size
+        self._orders[order.uid].size = order.size
+        self._orders[order.uid].parent_limit.size -= size_diff
+
+    def remove(self, order: Order): 
+        """Removes an order from the book.
+
+        If the Limit Level is then empty, it is also removed from the book's
+        relevant tree.
+
+        If the removed LimitLevel was either the top bid or ask, it is replaced
+        by the next best value (which is the LimitLevel's parent in an
+        AVL tree).
+
+        :param order:
+        :return:
+        """
+        # Remove Order from self._orders
+        try:
+            popped_item = self._orders.pop(order.uid)
+        except KeyError:
+            return False
+
+        # Remove order from its doubly linked list
+        popped_item.pop_from_list()
+
+        # Remove Limit Level from self._price_levels and tree, if no orders are
+        # left within that limit level
+        try:
+            if len(self._price_levels[popped_item.price]) == 0:
+                popped_limit_level = self._price_levels.pop(popped_item.price)
+                # Remove Limit Level from LimitLevelTree
+                if popped_item.is_bid:
+                    if popped_limit_level == self.best_bid:
+                        if not isinstance(popped_limit_level.parent, LimitLevelTree):
+                            self.best_bid = popped_limit_level.parent
+                        else:
+                            self.best_bid = None
+
+                    popped_limit_level.remove()
+                else:
+                    if popped_limit_level == self.best_ask:
+                        if not isinstance(popped_limit_level.parent, LimitLevelTree):
+                            self.best_ask = popped_limit_level.parent
+                        else:
+                            self.best_ask = None
+                    popped_limit_level.remove()
+        except KeyError:
+            pass
+
+        return popped_item
+
+    def add(self, order: Order): 
+        """Adds a new LimitLevel to the book and appends the given order to it.
+
+        :param order: Order() Instance
+        :return:
+        """
+
+        if order.price not in self._price_levels:
+            limit_level = LimitLevel(order)
+            self._orders[order.uid] = order
+            self._price_levels[limit_level.price] = limit_level
+
+            if order.is_bid:
+                self.bids.insert(limit_level)
+                if self.best_bid is None or limit_level.price > self.best_bid.price:
+                    self.best_bid = limit_level
+
+            else:
+                self.asks.insert(limit_level)
+                if self.best_ask is None or limit_level.price < self.best_ask.price:
+                    self.best_ask = limit_level
+        else:
+            # The price level already exists, hence we need to append the order
+            # to that price level
+            self._orders[order.uid] = order
+            self._price_levels[order.price].append(order)
+    
+    
+    def levels(self, depth=None):
+        """Returns the price levels as a dict {'bids': [bid1, ...], 'asks': [ask1, ...]}
+        
+        :param depth: Desired number of levels on each side to return.
+        :return:
+        """
+        levels_sorted = sorted(self._price_levels.keys())
+        bids_all = reversed([price_level for price_level in levels_sorted if price_level < self.best_ask.price])
+        bids = list(islice(bids_all, depth)) if depth else list(bids_all)
+        asks_all = (price_level for price_level in levels_sorted if price_level > self.best_bid.price)
+        asks = list(islice(asks_all, depth)) if depth else list(asks_all)
+        levels_dict = {
+            'bids' : [self._price_levels[price] for price in bids],
+            'asks' : [self._price_levels[price] for price in asks],
+            }
+        return levels_dict

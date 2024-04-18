@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import polars as pl
 import seaborn as sns
 import tqdm
 from databento_dbn import FIXED_PRICE_SCALE, UNDEF_PRICE
+from scipy.spatial.distance import pdist, squareform
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import *
 from sklearn.metrics import mean_squared_error, r2_score
@@ -135,3 +137,44 @@ def prep_for_prediction(df: pl.DataFrame, offset=1000, lookback="1s"):
     # cast to f32
   
     return df
+
+
+
+def distance_correlation(x: np.array, y: np.array) -> float:
+    """
+    Returns distance correlation between two vectors. Distance correlation captures both linear and non-linear
+    dependencies.
+
+    Formula used for calculation:
+
+    Distance_Corr[X, Y] = dCov[X, Y] / (dCov[X, X] * dCov[Y, Y])^(1/2)
+
+    dCov[X, Y] is the average Hadamard product of the doubly-centered Euclidean distance matrices of X, Y.
+
+    Read Cornell lecture notes for more information about distance correlation:
+    https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3512994&download=yes.
+
+    :param x: (np.array/pd.Series) X vector.
+    :param y: (np.array/pd.Series) Y vector.
+    :return: (float) Distance correlation coefficient.
+    """
+
+    x = x[:, None]
+    y = y[:, None]
+
+    x = np.atleast_2d(x)
+    y = np.atleast_2d(y)
+
+    a = squareform(pdist(x))
+    b = squareform(pdist(y))
+
+    A = a - a.mean(axis=0)[None, :] - a.mean(axis=1)[:, None] + a.mean()
+    B = b - b.mean(axis=0)[None, :] - b.mean(axis=1)[:, None] + b.mean()
+
+    d_cov_xx = (A * A).sum() / (x.shape[0] ** 2)
+    d_cov_xy = (A * B).sum() / (x.shape[0] ** 2)
+    d_cov_yy = (B * B).sum() / (x.shape[0] ** 2)
+
+    coef = np.sqrt(d_cov_xy) / np.sqrt(np.sqrt(d_cov_xx) * np.sqrt(d_cov_yy))
+
+    return coef

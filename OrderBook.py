@@ -4,14 +4,13 @@ import os
 import warnings
 from dataclasses import dataclass, field
 
+import databento as db
 import matplotlib.pyplot as plt
 import pandas as pd
 import polars as pl
 import seaborn as sns
 import tqdm
 from databento_dbn import FIXED_PRICE_SCALE, UNDEF_PRICE
-
-import databento as db
 
 OrderId = int
 UnixTimestamp = int
